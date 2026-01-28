@@ -7,7 +7,7 @@ function(cat IN_FILE OUT_FILE)
   file(APPEND ${OUT_FILE} "${CONTENTS}")
 endfunction()
 
-set(FILE_VERSION 5.44)
+set(FILE_VERSION 5.46)
 
 set(WIN_COMPAT_SOURCES 
   file/src/asctime_r.c
@@ -23,7 +23,6 @@ set(WIN_COMPAT_SOURCES
   file/src/strlcpy.c
   file/src/vasprintf.c
   file/src/fmtcheck.c
-  win-headers/magic.def
 )
 
 set(LIBMAGIC_SOURCE_FILES
@@ -40,6 +39,7 @@ set(LIBMAGIC_SOURCE_FILES
   file/src/fsmagic.c
   file/src/funcs.c
   file/src/is_json.c
+  file/src/is_simh.c
   file/src/is_tar.c
   ${CMAKE_CURRENT_BINARY_DIR}/magic.c
   file/src/print.c
@@ -70,12 +70,12 @@ FILE(WRITE file/src/file.h "${FILE_H_CONTENT_NEW}")
 
 # patch test.c and include <getopt.h>
 FILE(READ file/tests/test.c TEST_C_CONTENT)
-STRING(CONCAT TEST_C_CONTENT_NEW "#include <getopt.h>\n" "${TEST_C_CONTENT}")
+STRING(CONCAT TEST_C_CONTENT_NEW "#include <getopt.h>\nvoid setenv(const char *name, const char *value, int overwrite) {_putenv_s(name, value);}\n" "${TEST_C_CONTENT}")
 FILE(WRITE file/tests/test.c "${TEST_C_CONTENT_NEW}")
 
 
 add_definitions(-DHAVE_CONFIG_H -DVERSION="${FILE_VERSION}" -DWIN32_LEAN_AND_MEAN -DWIN32 -DPCRE2_STATIC )
-add_library(libmagic SHARED ${LIBMAGIC_SOURCE_FILES})
+add_library(libmagic STATIC ${LIBMAGIC_SOURCE_FILES})
 include_directories (${CMAKE_CURRENT_SOURCE_DIR}/win-headers pcre2/src file/src dirent/include getopt)
 target_link_libraries(libmagic pcre2-posix shlwapi)
 
@@ -136,3 +136,34 @@ add_custom_command(OUTPUT magic.mgc
 )
 
 add_custom_target(magic_mgc ALL DEPENDS magic.mgc)
+
+# Generate embedded magic header from magic.mgc (using PowerShell for speed)
+add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/magic_embedded.h
+  COMMAND powershell -ExecutionPolicy Bypass -File
+    ${CMAKE_CURRENT_SOURCE_DIR}/win-headers/bin2header.ps1
+    -InputFile ${CMAKE_CURRENT_BINARY_DIR}/magic.mgc
+    -OutputFile ${CMAKE_CURRENT_BINARY_DIR}/magic_embedded.h
+    -ArrayName magic_mgc_data
+  DEPENDS magic.mgc
+  COMMENT "Generating embedded magic header"
+)
+
+# Create patched file.c for standalone build with embedded magic
+FILE(READ file/src/file.c FILE_C_CONTENT)
+# Add include for embedded magic at the top
+STRING(REPLACE "#include \"file.h\"" "#include \"file.h\"\n#ifdef MAGIC_EMBEDDED\n#include \"magic_embedded.h\"\n#endif" FILE_C_CONTENT "${FILE_C_CONTENT}")
+# Replace the load function to use embedded magic when available
+STRING(REPLACE
+"	if (magic_load(magic, magicfile) == -1) {"
+"#ifdef MAGIC_EMBEDDED\n\tif (magicfile == NULL) {\n\t\tvoid *bufs[1] = { (void *)magic_mgc_data };\n\t\tsize_t sizes[1] = { magic_mgc_data_size };\n\t\tif (magic_load_buffers(magic, bufs, sizes, 1) == -1) {\n\t\t\tfile_warn(\"%s\", magic_error(magic));\n\t\t\tmagic_close(magic);\n\t\t\treturn NULL;\n\t\t}\n\t} else\n#endif\n\tif (magic_load(magic, magicfile) == -1) {"
+FILE_C_CONTENT "${FILE_C_CONTENT}")
+FILE(WRITE ${CMAKE_CURRENT_BINARY_DIR}/file_standalone.c "${FILE_C_CONTENT}")
+
+# Standalone file.exe with embedded magic database
+add_executable(file_standalone ${CMAKE_CURRENT_BINARY_DIR}/file_standalone.c)
+target_compile_definitions(file_standalone PRIVATE MAGIC_EMBEDDED)
+target_include_directories(file_standalone PRIVATE ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/file/src)
+target_link_libraries(file_standalone libmagic pcre2-posix shlwapi)
+set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/file_standalone.c
+  PROPERTIES OBJECT_DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/magic_embedded.h)
+add_dependencies(file_standalone magic_mgc)
