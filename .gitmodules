@@ -4,6 +4,3 @@
 [submodule "dirent"]
 	path = dirent
 	url = https://github.com/tronkko/dirent.git
-[submodule "getopt"]
-	path = getopt
-	url = https://github.com/skandhurkat/Getopt-for-Visual-Studio.git

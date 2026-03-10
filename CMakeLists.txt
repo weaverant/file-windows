@@ -84,8 +84,8 @@ add_subdirectory(pcre2)
 # copy /pcre2posix.h to regex.h so it can be used as posix regex libary
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/pcre2/src/pcre2posix.h ${CMAKE_CURRENT_SOURCE_DIR}/pcre2/src/regex.h COPYONLY)
 
-add_executable(file file/src/file.c)
-add_executable(file_test file/tests/test.c)
+add_executable(file file/src/file.c getopt/getopt.c)
+add_executable(file_test file/tests/test.c getopt/getopt.c)
 target_link_libraries(file_test libmagic pcre2-posix shlwapi)
 target_link_libraries(file libmagic pcre2-posix shlwapi)
 
@@ -160,7 +160,7 @@ FILE_C_CONTENT "${FILE_C_CONTENT}")
 FILE(WRITE ${CMAKE_CURRENT_BINARY_DIR}/file_standalone.c "${FILE_C_CONTENT}")
 
 # Standalone file.exe with embedded magic database
-add_executable(file_standalone ${CMAKE_CURRENT_BINARY_DIR}/file_standalone.c)
+add_executable(file_standalone ${CMAKE_CURRENT_BINARY_DIR}/file_standalone.c getopt/getopt.c)
 target_compile_definitions(file_standalone PRIVATE MAGIC_EMBEDDED)
 target_include_directories(file_standalone PRIVATE ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/file/src)
 target_link_libraries(file_standalone libmagic pcre2-posix shlwapi)
