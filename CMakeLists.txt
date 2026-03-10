@@ -64,19 +64,24 @@ FILE(READ file/src/magic.c MAGIC_C_CONTENT)
 STRING(CONCAT MAGIC_C_CONTENT_NEW "#include <dirent.h>\n" "${MAGIC_C_CONTENT}")
 FILE(WRITE ${CMAKE_CURRENT_BINARY_DIR}/magic.c "${MAGIC_C_CONTENT_NEW}")
 
+# patch file.h: add Windows compat headers (idempotent, must write to source dir
+# because #include "file.h" resolves relative to source before include path)
 FILE(READ file/src/file.h FILE_H_CONTENT)
-STRING(CONCAT FILE_H_CONTENT_NEW "#ifdef WIN32\n#include <unistd.h>\n#include <dirent.h>\n#undef S_IFLNK\n#undef S_IFSOCK\n#endif\n" "${FILE_H_CONTENT}")
-FILE(WRITE file/src/file.h "${FILE_H_CONTENT_NEW}")
+STRING(FIND "${FILE_H_CONTENT}" "WIN32_COMPAT_PATCHED" FILE_H_PATCHED)
+if(FILE_H_PATCHED EQUAL -1)
+  STRING(CONCAT FILE_H_CONTENT_NEW "/* WIN32_COMPAT_PATCHED */\n#ifdef WIN32\n#include <unistd.h>\n#include <dirent.h>\n#undef S_IFLNK\n#undef S_IFSOCK\n#endif\n" "${FILE_H_CONTENT}")
+  FILE(WRITE file/src/file.h "${FILE_H_CONTENT_NEW}")
+endif()
 
-# patch test.c and include <getopt.h>
+# patch test.c: add getopt and setenv shim (write to build dir to avoid double-patching)
 FILE(READ file/tests/test.c TEST_C_CONTENT)
-STRING(CONCAT TEST_C_CONTENT_NEW "#include <getopt.h>\nvoid setenv(const char *name, const char *value, int overwrite) {_putenv_s(name, value);}\n" "${TEST_C_CONTENT}")
-FILE(WRITE file/tests/test.c "${TEST_C_CONTENT_NEW}")
+STRING(CONCAT TEST_C_CONTENT_NEW "#include <stdlib.h>\n#include <getopt.h>\nstatic void setenv(const char *name, const char *value, int overwrite) {(void)overwrite; _putenv_s(name, value);}\n" "${TEST_C_CONTENT}")
+FILE(WRITE ${CMAKE_CURRENT_BINARY_DIR}/test.c "${TEST_C_CONTENT_NEW}")
 
 
 add_definitions(-DHAVE_CONFIG_H -DVERSION="${FILE_VERSION}" -DWIN32_LEAN_AND_MEAN -DWIN32 -DPCRE2_STATIC )
 add_library(libmagic STATIC ${LIBMAGIC_SOURCE_FILES})
-include_directories (${CMAKE_CURRENT_SOURCE_DIR}/win-headers pcre2/src file/src dirent/include getopt)
+include_directories (${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/win-headers pcre2/src file/src dirent/include getopt)
 target_link_libraries(libmagic pcre2-posix shlwapi)
 
 add_subdirectory(pcre2)
@@ -85,7 +90,7 @@ add_subdirectory(pcre2)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/pcre2/src/pcre2posix.h ${CMAKE_CURRENT_SOURCE_DIR}/pcre2/src/regex.h COPYONLY)
 
 add_executable(file file/src/file.c getopt/getopt.c)
-add_executable(file_test file/tests/test.c getopt/getopt.c)
+add_executable(file_test ${CMAKE_CURRENT_BINARY_DIR}/test.c getopt/getopt.c)
 target_link_libraries(file_test libmagic pcre2-posix shlwapi)
 target_link_libraries(file libmagic pcre2-posix shlwapi)
 
